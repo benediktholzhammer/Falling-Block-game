@@ -3,10 +3,14 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
-import java.awt.AlphaComposite;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class tetris extends JFrame {
     private TetrisPanel gamePanel;
@@ -37,6 +41,7 @@ class TetrisPanel extends JPanel {
     private static final int GRID_OFFSET_X = 175;
     private static final int GRID_OFFSET_Y = 10;
     private static final int PREFERRED_WIDTH = GRID_OFFSET_X + (GRID_WIDTH * BLOCK_SIZE) + PADDING + 10;
+    private static final String THEMES_FILE = "themes.yaml";
 
     private int[][] grid;
     private Tetromino currentTetromino;
@@ -52,7 +57,6 @@ class TetrisPanel extends JPanel {
     private float renderPieceX;
     private float targetPieceX;
     private Timer renderTimer;
-    private long colorCycleTime = 0;
 
     private List<Integer> highScores;
     private static final String HIGH_SCORES_FILE = "highscores.txt";
@@ -64,7 +68,7 @@ class TetrisPanel extends JPanel {
     private static final long IMAGE_DISPLAY_TIME = 2000;
     private BufferedImage gameOverImage = null;
     private boolean imageLoadAttempted = false;
-    private int guiDesign = 0; // 0 = Default, 1 = Neon, 2 = Retro, 3 = Windows 95
+    private int guiDesign = 0; // index into designNames -- also the theme key used to look up colors
     private Rectangle[] designButtons = new Rectangle[4];
     private String[] designNames = {"Default", "Sunset", "Retro", "Win95"};
     private static final int BUTTON_WIDTH = 80;
@@ -72,11 +76,16 @@ class TetrisPanel extends JPanel {
     private static final int BUTTONS_START_Y = 720;
     private static final int BUTTON_SPACING = 10;
 
+    // Themes loaded from themes.yaml, keyed by theme name (matches entries in designNames)
+    private Map<String, Theme> themes;
+
     public TetrisPanel() {
         setPreferredSize(new Dimension(PREFERRED_WIDTH, HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
         requestFocus();
+
+        loadThemes();
 
         grid = new int[GRID_HEIGHT][GRID_WIDTH];
         score = 0;
@@ -172,7 +181,6 @@ class TetrisPanel extends JPanel {
         renderPieceX = currentTetromino.x * BLOCK_SIZE;
         targetPieceX = renderPieceX;
         renderTimer = new Timer(16, e -> {
-            colorCycleTime += 16; 
             if (!gameOver && !gamePaused) {
                 float frameDelay = renderTimer.getDelay();
                 float gameDelay = Math.max(1, gameTimer.getDelay());
@@ -196,6 +204,54 @@ class TetrisPanel extends JPanel {
             repaint();
         });
         renderTimer.start();
+    }
+
+    /**
+     * Loads all themes from themes.yaml (searched in the working directory).
+     * If the file is missing, unreadable, or a design is not defined inside it,
+     * a safe fallback theme is generated so the game never crashes because of it.
+     */
+    private void loadThemes() {
+        themes = ThemeLoader.load(resolveThemesPath());
+
+        for (String name : designNames) {
+            if (!themes.containsKey(name)) {
+                System.err.println("Warnung: Theme '" + name + "' wurde nicht in " + THEMES_FILE + " gefunden, verwende Standardwerte.");
+                Theme fallback = new Theme();
+                fallback.name = name;
+                fallback.buttonColors = Arrays.asList(Color.GRAY, Color.GRAY, Color.GRAY, Color.GRAY);
+                fallback.paletteColors = Arrays.asList(Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW, Color.CYAN, Color.MAGENTA, Color.ORANGE);
+                fallback.applyFallbacks();
+                themes.put(name, fallback);
+            }
+        }
+    }
+
+    private String resolveThemesPath() {
+        String[] candidates = {
+            THEMES_FILE,
+            System.getProperty("user.dir") + File.separator + THEMES_FILE
+        };
+        for (String c : candidates) {
+            if (new File(c).exists()) {
+                return c;
+            }
+        }
+        return THEMES_FILE;
+    }
+
+    /** Returns the Theme object for the currently selected design. Never returns null. */
+    private Theme currentTheme() {
+        Theme t = themes.get(designNames[guiDesign]);
+        if (t != null) return t;
+        if (!themes.isEmpty()) return themes.values().iterator().next();
+        Theme empty = new Theme();
+        empty.applyFallbacks();
+        return empty;
+    }
+
+    private Color withAlpha(Color c, int alpha) {
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
     private void bild() {
@@ -459,14 +515,9 @@ class TetrisPanel extends JPanel {
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // Draw background based on design
-        if (guiDesign == 3) {
-            g2d.setColor(new Color(192, 192, 192));
-            g2d.fillRect(0, 0, WIDTH, HEIGHT);
-        } else {
-            g2d.setColor(Color.BLACK);
-            g2d.fillRect(0, 0, WIDTH, HEIGHT);
-        }
+        Theme theme = currentTheme();
+        g2d.setColor(theme.background);
+        g2d.fillRect(0, 0, WIDTH, HEIGHT);
         
         drawGrid(g2d);
         drawGhostPiece(g2d);
@@ -485,158 +536,94 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawStats(Graphics2D g) {
-        if (guiDesign == 0) {
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 0));
-            g.setFont(new Font("Arial", Font.BOLD, 14));
-            g.drawString("Lines: " + lines, 10, 250);
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 1));
-            g.drawString("Level: " + level, 10, 280);
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 2));
-            g.drawString("Combo: " + comboCount, 10, 310);
-        } else if (guiDesign == 1) {
-            g.setFont(new Font("Arial", Font.BOLD, 14));
-            g.setColor(new Color(255, 165, 0));
-            g.drawString("Lines: " + lines, 10, 250);
-            g.setColor(new Color(255, 100, 0));
-            g.drawString("Level: " + level, 10, 280);
-            g.setColor(new Color(255, 69, 0));
-            g.drawString("Combo: " + comboCount, 10, 310);
-        } else if (guiDesign == 2) {
-            g.setFont(new Font("Courier New", Font.PLAIN, 14));
-            g.setColor(new Color(200, 200, 0));
-            g.drawString("Lines: " + lines, 10, 250);
-            g.drawString("Level: " + level, 10, 280);
-            g.drawString("Combo: " + comboCount, 10, 310);
+        Theme theme = currentTheme();
+        Font font;
+        if (guiDesign == 2) {
+            font = new Font("Courier New", Font.PLAIN, 14);
+        } else if (guiDesign == 3) {
+            font = new Font("MS Sans Serif", Font.PLAIN, 11);
         } else {
-            // Windows 95 style
-            g.setFont(new Font("MS Sans Serif", Font.PLAIN, 11));
-            g.setColor(new Color(0, 0, 0));
-            g.drawString("Lines: " + lines, 10, 250);
-            g.drawString("Level: " + level, 10, 280);
-            g.drawString("Combo: " + comboCount, 10, 310);
+            font = new Font("Arial", Font.BOLD, 14);
         }
+
+        g.setFont(font);
+        g.setColor(theme.stat1Color);
+        g.drawString("Lines: " + lines, 10, 250);
+        g.setColor(theme.stat2Color);
+        g.drawString("Level: " + level, 10, 280);
+        g.setColor(theme.stat3Color);
+        g.drawString("Combo: " + comboCount, 10, 310);
     }
 
     private void drawPaused(Graphics2D g) {
+        Theme theme = currentTheme();
+
         if (guiDesign == 0) {
-            g.setColor(new Color(0, 0, 0, 150));
+            g.setColor(withAlpha(Color.BLACK, 150));
             g.fillRect(0, 0, WIDTH, HEIGHT);
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 0));
+            g.setColor(theme.scoreColor);
             g.setFont(new Font("Arial", Font.BOLD, 48));
             g.drawString("PAUSED", 250, 300);
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 1));
+            g.setColor(theme.labelColor);
             g.setFont(new Font("Arial", Font.BOLD, 16));
             g.drawString("Press P to Resume | Press D to Change Design", 220, 350);
         } else if (guiDesign == 1) {
-            g.setColor(new Color(40, 20, 10, 180));
+            g.setColor(withAlpha(theme.background, 180));
             g.fillRect(0, 0, WIDTH, HEIGHT);
-            g.setColor(new Color(255, 100, 0, 150));
+            g.setColor(withAlpha(theme.border, 150));
             g.fillRect(200, 260, 300, 100);
-            g.setColor(new Color(255, 165, 0));
+            g.setColor(theme.scoreColor);
             g.setFont(new Font("Arial", Font.BOLD, 48));
             g.drawString("PAUSED", 250, 320);
-            g.setColor(new Color(255, 200, 50));
+            g.setColor(theme.labelColor);
             g.setFont(new Font("Arial", Font.BOLD, 14));
             g.drawString(">> Press P to Resume | Press D to Change Design <<", 180, 380);
         } else if (guiDesign == 2) {
-            g.setColor(new Color(50, 50, 50, 180));
+            g.setColor(withAlpha(Color.DARK_GRAY, 180));
             g.fillRect(0, 0, WIDTH, HEIGHT);
-            g.setColor(new Color(200, 200, 0));
+            g.setColor(theme.border);
             g.setStroke(new BasicStroke(3));
             g.drawRect(150, 250, 400, 150);
             g.setFont(new Font("Courier New", Font.BOLD, 40));
+            g.setColor(theme.scoreColor);
             g.drawString("PAUSED", 280, 320);
+            g.setColor(theme.labelColor);
             g.setFont(new Font("Courier New", Font.PLAIN, 14));
             g.drawString("[P] RESUME  [D] DESIGN", 260, 380);
         } else {
-            // Windows 95 style pause
-            g.setColor(new Color(192, 192, 192, 200));
+            g.setColor(withAlpha(theme.background, 200));
             g.fillRect(0, 0, WIDTH, HEIGHT);
-            
-            // Draw beveled window frame
-            g.setColor(new Color(255, 255, 255));
+
+            g.setColor(theme.buttonUnselectedLight);
             g.setStroke(new BasicStroke(2));
             g.drawRect(150, 200, 400, 250);
-            g.setColor(new Color(128, 128, 128));
+            g.setColor(theme.buttonUnselectedDark);
             g.drawLine(151, 200, 151, 450);
             g.drawLine(150, 200, 550, 200);
-            
-            g.setColor(new Color(0, 0, 170));
+
+            g.setColor(theme.border);
             g.fillRect(150, 200, 400, 25);
-            g.setColor(new Color(255, 255, 255));
+            g.setColor(theme.buttonTextColor);
             g.setFont(new Font("MS Sans Serif", Font.BOLD, 14));
             g.drawString("PAUSED", 300, 220);
-            
-            g.setColor(new Color(0, 0, 0));
+
+            g.setColor(theme.labelColor);
             g.setFont(new Font("MS Sans Serif", Font.PLAIN, 12));
             g.drawString("P = Resume  |  D = Design", 220, 300);
         }
     }
 
+    /** Looks up the color for a placed/falling piece from the current theme's palette. */
     private Color getDesignColor(int colorIndex) {
-        if (guiDesign == 0) {
-            return ColorCycler.getPastelRainbowColor(colorCycleTime, colorIndex);
-        } else if (guiDesign == 1) {
-            Color[] sunsetColors = {
-                new Color(255, 165, 0),  // Orange
-                new Color(255, 100, 0),  // Dark Orange
-                new Color(255, 69, 0),   // Red-Orange
-                new Color(220, 80, 0),   // Deep Orange
-                new Color(255, 140, 0),  // Light Orange
-                new Color(200, 60, 0),   // Rust
-                new Color(255, 110, 0),  // Golden Orange
-                new Color(180, 50, 0)    // Dark Rust
-            };
-            return sunsetColors[colorIndex % sunsetColors.length];
-        } else if (guiDesign == 2) {
-            Color[] retroColors = {
-                new Color(200, 200, 0),  // Yellow
-                new Color(200, 0, 0),    // Red
-                new Color(0, 200, 200),  // Cyan
-                new Color(200, 100, 0),  // Orange
-                new Color(200, 0, 200),  // Magenta
-                new Color(0, 200, 0),    // Green
-                new Color(200, 200, 0),  // Yellow
-                new Color(200, 0, 0)     // Red
-            };
-            return retroColors[colorIndex % retroColors.length];
-        } else {
-            // Windows 95 style colors
-            Color[] win95Colors = {
-                new Color(0, 0, 170),    // Dark Blue
-                new Color(0, 170, 170),  // Cyan
-                new Color(170, 0, 0),    // Red
-                new Color(170, 85, 0),   // Brown
-                new Color(170, 0, 170),  // Magenta
-                new Color(0, 170, 0),    // Green
-                new Color(170, 170, 0),  // Yellow
-                new Color(0, 0, 255)     // Bright Blue
-            };
-            return win95Colors[colorIndex % win95Colors.length];
-        }
+        return currentTheme().paletteColor(colorIndex);
     }
 
     private void drawGrid(Graphics2D g) {
-        Color bgColor, gridColor, borderColor;
-        
-        if (guiDesign == 0) {
-            bgColor = Color.BLACK;
-            gridColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 3);
-            borderColor = gridColor;
-        } else if (guiDesign == 1) {
-            bgColor = new Color(40, 20, 10);
-            gridColor = new Color(150, 70, 20);
-            borderColor = new Color(255, 165, 0);
-        } else if (guiDesign == 2) {
-            bgColor = new Color(30, 30, 30);
-            gridColor = new Color(100, 100, 0);
-            borderColor = new Color(200, 200, 0);
-        } else {
-            bgColor = new Color(212, 208, 200);  // Windows 95 light gray
-            gridColor = new Color(128, 128, 128);
-            borderColor = new Color(0, 0, 170);
-        }
-        
+        Theme theme = currentTheme();
+        Color bgColor = theme.background;
+        Color gridColor = theme.grid;
+        Color borderColor = theme.border;
+
         g.setColor(bgColor);
         g.fillRect(GRID_OFFSET_X - 2, GRID_OFFSET_Y - 2, GRID_WIDTH * BLOCK_SIZE + 4, GRID_HEIGHT * BLOCK_SIZE + 4);
 
@@ -656,12 +643,7 @@ class TetrisPanel extends JPanel {
                     Color blockColor = getDesignColor(grid[i][j]);
                     drawBlockAtCell(g, j, i, blockColor);
                 } else {
-                    Color gridlineColor;
-                    if (guiDesign == 0) gridlineColor = new Color(50, 50, 50);
-                    else if (guiDesign == 1) gridlineColor = new Color(100, 50, 20);
-                    else if (guiDesign == 2) gridlineColor = new Color(80, 80, 30);
-                    else gridlineColor = new Color(160, 160, 160);
-                    g.setColor(gridlineColor);
+                    g.setColor(withAlpha(gridColor, 130));
                     g.drawRect(GRID_OFFSET_X + j * BLOCK_SIZE, GRID_OFFSET_Y + i * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
                 }
             }
@@ -677,10 +659,10 @@ class TetrisPanel extends JPanel {
         
         // Draw border with Windows 95 beveled effect for Win95 design
         if (guiDesign == 3) {
-            g.setColor(new Color(255, 255, 255));
+            g.setColor(theme.buttonUnselectedLight);
             g.setStroke(new BasicStroke(2));
             g.drawRect(GRID_OFFSET_X - 3, GRID_OFFSET_Y - 3, GRID_WIDTH * BLOCK_SIZE + 6, GRID_HEIGHT * BLOCK_SIZE + 6);
-            g.setColor(new Color(128, 128, 128));
+            g.setColor(theme.buttonUnselectedDark);
             g.drawRect(GRID_OFFSET_X - 2, GRID_OFFSET_Y - 2, GRID_WIDTH * BLOCK_SIZE + 4, GRID_HEIGHT * BLOCK_SIZE + 4);
         } else {
             g.setColor(borderColor);
@@ -766,25 +748,26 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawDesignButtons(Graphics2D g) {
+        Theme theme = currentTheme();
         for (int i = 0; i < designButtons.length; i++) {
             Rectangle btn = designButtons[i];
             boolean isSelected = (i == guiDesign);
-            
+            Color btnColor = theme.buttonColor(i);
+
             if (guiDesign == 3) {
                 // Windows 95 style buttons
-                Color btnColor = new Color(192, 192, 192);
                 g.setColor(btnColor);
                 g.fillRect(btn.x, btn.y, btn.width, btn.height);
-                
-                g.setColor(isSelected ? new Color(128, 128, 128) : new Color(255, 255, 255));
+
+                g.setColor(isSelected ? theme.buttonSelectedLight : theme.buttonUnselectedLight);
                 g.drawLine(btn.x, btn.y, btn.x + btn.width, btn.y);
                 g.drawLine(btn.x, btn.y, btn.x, btn.y + btn.height);
-                
-                g.setColor(isSelected ? new Color(255, 255, 255) : new Color(128, 128, 128));
+
+                g.setColor(isSelected ? theme.buttonSelectedDark : theme.buttonUnselectedDark);
                 g.drawLine(btn.x + btn.width, btn.y, btn.x + btn.width, btn.y + btn.height);
                 g.drawLine(btn.x, btn.y + btn.height, btn.x + btn.width, btn.y + btn.height);
-                
-                g.setColor(new Color(0, 0, 0));
+
+                g.setColor(theme.buttonTextColor);
                 g.setFont(new Font("MS Sans Serif", Font.PLAIN, 10));
                 FontMetrics fm = g.getFontMetrics();
                 int textX = btn.x + (btn.width - fm.stringWidth(designNames[i])) / 2;
@@ -792,30 +775,19 @@ class TetrisPanel extends JPanel {
                 g.drawString(designNames[i], textX, textY);
             } else {
                 // Colorful buttons for other designs
-                Color btnColor;
-                if (guiDesign == 0) {
-                    btnColor = ColorCycler.getPastelRainbowColor(colorCycleTime, i);
-                } else if (guiDesign == 1) {
-                    Color[] colors = {new Color(255, 165, 0), new Color(255, 100, 0), new Color(255, 69, 0), new Color(220, 80, 0)};
-                    btnColor = colors[i];
-                } else {
-                    Color[] colors = {new Color(200, 200, 0), new Color(200, 0, 0), new Color(0, 200, 200), new Color(200, 100, 0)};
-                    btnColor = colors[i];
-                }
-                
                 g.setColor(btnColor);
                 g.fillRect(btn.x, btn.y, btn.width, btn.height);
-                
+
                 if (isSelected) {
                     g.setStroke(new BasicStroke(3));
-                    g.setColor(new Color(255, 255, 255));
+                    g.setColor(theme.buttonSelectedLight);
                 } else {
                     g.setStroke(new BasicStroke(1));
-                    g.setColor(new Color(0, 0, 0));
+                    g.setColor(theme.buttonUnselectedDark);
                 }
                 g.drawRect(btn.x, btn.y, btn.width, btn.height);
-                
-                g.setColor(new Color(0, 0, 0));
+
+                g.setColor(theme.buttonTextColor);
                 g.setFont(new Font("Arial", Font.BOLD, 9));
                 FontMetrics fm = g.getFontMetrics();
                 int textX = btn.x + (btn.width - fm.stringWidth(designNames[i])) / 2;
@@ -826,68 +798,50 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawScore(Graphics2D g) {
-        Color scoreColor;
+        Theme theme = currentTheme();
         Font scoreFont;
-        
-        if (guiDesign == 0) {
-            scoreColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 4);
-            scoreFont = new Font("Arial", Font.BOLD, 20);
-        } else if (guiDesign == 1) {
-            scoreColor = new Color(255, 165, 0);
-            scoreFont = new Font("Arial", Font.BOLD, 20);
-        } else if (guiDesign == 2) {
-            scoreColor = new Color(200, 200, 0);
+        if (guiDesign == 2) {
             scoreFont = new Font("Courier New", Font.BOLD, 20);
-        } else {
-            scoreColor = new Color(0, 0, 0);
+        } else if (guiDesign == 3) {
             scoreFont = new Font("MS Sans Serif", Font.BOLD, 14);
+        } else {
+            scoreFont = new Font("Arial", Font.BOLD, 20);
         }
         
-        g.setColor(scoreColor);
+        g.setColor(theme.scoreColor);
         g.setFont(scoreFont);
         g.drawString("Score: " + score, 10, 30);
     }
 
     private void drawNextPiece(Graphics2D g) {
+        Theme theme = currentTheme();
         int previewX = 10;
         int previewY = 100;
         int previewBlockSize = 20;
         int boxSize = 120;
 
-        Color labelColor, boxColor;
         Font labelFont;
-        
-        if (guiDesign == 0) {
-            labelColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 5);
-            boxColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 6);
-            labelFont = new Font("Arial", Font.BOLD, 14);
-        } else if (guiDesign == 1) {
-            labelColor = new Color(255, 165, 0);
-            boxColor = new Color(255, 165, 0);
-            labelFont = new Font("Arial", Font.BOLD, 14);
-        } else if (guiDesign == 2) {
-            labelColor = new Color(200, 200, 0);
-            boxColor = new Color(200, 200, 0);
+        if (guiDesign == 2) {
             labelFont = new Font("Courier New", Font.BOLD, 14);
-        } else {
-            labelColor = new Color(0, 0, 0);
-            boxColor = new Color(0, 0, 0);
+        } else if (guiDesign == 3) {
             labelFont = new Font("MS Sans Serif", Font.PLAIN, 11);
+        } else {
+            labelFont = new Font("Arial", Font.BOLD, 14);
         }
 
-        g.setColor(labelColor);
+        g.setColor(theme.labelColor);
         g.setFont(labelFont);
         g.drawString("Next:", previewX, previewY);
-        g.setColor(boxColor);
+        g.setColor(theme.boxColor);
         
         if (guiDesign == 3) {
             // Windows 95 beveled box
-            g.setColor(new Color(192, 192, 192));
+            g.setColor(theme.background);
             g.fillRect(previewX, previewY + 15, boxSize, boxSize);
-            g.setColor(new Color(255, 255, 255));
+            g.setColor(theme.buttonUnselectedLight);
             g.drawLine(previewX, previewY + 15, previewX + boxSize, previewY + 15);
             g.drawLine(previewX, previewY + 15, previewX, previewY + 15 + boxSize);
-            g.setColor(new Color(128, 128, 128));
+            g.setColor(theme.buttonUnselectedDark);
             g.drawLine(previewX + boxSize, previewY + 15, previewX + boxSize, previewY + 15 + boxSize);
             g.drawLine(previewX, previewY + 15 + boxSize, previewX + boxSize, previewY + 15 + boxSize);
         } else {
@@ -916,45 +870,34 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawHeldPiece(Graphics2D g) {
+        Theme theme = currentTheme();
         int previewX = 10;
         int previewY = 350;
         int previewBlockSize = 20;
         int boxSize = 120;
 
-        Color labelColor, boxColor;
         Font labelFont;
-        
-        if (guiDesign == 0) {
-            labelColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 7);
-            boxColor = ColorCycler.getPastelRainbowColor(colorCycleTime, 8);
-            labelFont = new Font("Arial", Font.BOLD, 14);
-        } else if (guiDesign == 1) {
-            labelColor = new Color(255, 100, 0);
-            boxColor = new Color(255, 100, 0);
-            labelFont = new Font("Arial", Font.BOLD, 14);
-        } else if (guiDesign == 2) {
-            labelColor = new Color(200, 200, 0);
-            boxColor = new Color(200, 200, 0);
+        if (guiDesign == 2) {
             labelFont = new Font("Courier New", Font.BOLD, 14);
-        } else {
-            labelColor = new Color(0, 0, 0);
-            boxColor = new Color(0, 0, 0);
+        } else if (guiDesign == 3) {
             labelFont = new Font("MS Sans Serif", Font.PLAIN, 11);
+        } else {
+            labelFont = new Font("Arial", Font.BOLD, 14);
         }
 
-        g.setColor(labelColor);
+        g.setColor(theme.labelColor);
         g.setFont(labelFont);
         g.drawString("Hold [C]:", previewX, previewY);
-        g.setColor(boxColor);
+        g.setColor(theme.boxColor);
         
         if (guiDesign == 3) {
             // Windows 95 beveled box
-            g.setColor(new Color(192, 192, 192));
+            g.setColor(theme.background);
             g.fillRect(previewX, previewY + 15, boxSize, boxSize);
-            g.setColor(new Color(255, 255, 255));
+            g.setColor(theme.buttonUnselectedLight);
             g.drawLine(previewX, previewY + 15, previewX + boxSize, previewY + 15);
             g.drawLine(previewX, previewY + 15, previewX, previewY + 15 + boxSize);
-            g.setColor(new Color(128, 128, 128));
+            g.setColor(theme.buttonUnselectedDark);
             g.drawLine(previewX + boxSize, previewY + 15, previewX + boxSize, previewY + 15 + boxSize);
             g.drawLine(previewX, previewY + 15 + boxSize, previewX + boxSize, previewY + 15 + boxSize);
         } else {
@@ -1002,24 +945,24 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawGameOverDefault(Graphics2D g) {
-        g.setColor(new Color(0, 0, 0, 200));
+        Theme theme = currentTheme();
+        g.setColor(withAlpha(theme.gameOverBackground, 200));
         g.fillRect(0, 0, WIDTH, HEIGHT);
         drawDesignButtons(g);
-        g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 0));
+        g.setColor(theme.gameOverHeaderTextColor);
         g.setFont(new Font("Arial", Font.BOLD, 36));
         g.drawString("GAME OVER", 50, 150);
         g.setFont(new Font("Arial", Font.BOLD, 16));
-        g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 1));
+        g.setColor(theme.gameOverInfoText);
         g.drawString("Final Score: " + score, 70, 200);
-        g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 2));
         g.drawString("Lines: " + lines + " | Level: " + level, 70, 220);
-        g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 3));
+        g.setColor(theme.gameOverHighScoreLabelColor);
         g.drawString("High Scores:", 70, 250);
         for (int i = 0; i < highScores.size(); i++) {
-            g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 4 + i));
+            g.setColor(i % 2 == 0 ? theme.stat1Color : theme.stat2Color);
             g.drawString((i + 1) + ". " + highScores.get(i), 70, 270 + i * 20);
         }
-        g.setColor(ColorCycler.getPastelRainbowColor(colorCycleTime, 5));
+        g.setColor(theme.gameOverFooterText);
         g.drawString("Press R to Restart | Press D to Change Design", 30, 270 + highScores.size() * 20 + 20);
         
         // Bild für 2 Sekunden anzeigen
@@ -1041,7 +984,6 @@ class TetrisPanel extends JPanel {
                         int y = (HEIGHT - displayHeight) / 2;
                         
                         g.drawImage(gameOverImage, x, y, displayWidth, displayHeight, null);
-                        System.out.println("Bild wird angezeigt: " + displayWidth + "x" + displayHeight + " (vergangen: " + elapsedTime + "ms)");
                     }
                 } catch (Exception e) {
                     System.err.println("Fehler beim Zeichnen des Bildes: " + e.getMessage());
@@ -1052,73 +994,72 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawGameOverSunset(Graphics2D g) {
-        g.setColor(new Color(40, 20, 10, 220));
+        Theme theme = currentTheme();
+        g.setColor(withAlpha(theme.gameOverBackground, 220));
         g.fillRect(0, 0, WIDTH, HEIGHT);
         drawDesignButtons(g);
         
         // Sunset glow effect
-        g.setColor(new Color(255, 100, 0, 100));
+        g.setColor(withAlpha(theme.border, 100));
         g.fillRect(40, 130, 300, 80);
         
-        g.setColor(new Color(255, 165, 0));
+        g.setColor(theme.gameOverHeaderTextColor);
         g.setFont(new Font("Arial", Font.BOLD, 48));
         g.drawString("GAME OVER", 45, 180);
         
         g.setFont(new Font("Arial", Font.BOLD, 14));
-        g.setColor(new Color(255, 140, 0));
+        g.setColor(theme.gameOverInfoText);
         g.drawString("Final Score: " + score, 70, 220);
-        g.setColor(new Color(255, 100, 0));
         g.drawString("Lines: " + lines + " | Level: " + level, 70, 240);
         
-        g.setColor(new Color(255, 165, 0));
+        g.setColor(theme.gameOverHighScoreLabelColor);
         g.drawString("Top Scores:", 70, 270);
         for (int i = 0; i < highScores.size(); i++) {
-            if (i % 2 == 0) {
-                g.setColor(new Color(255, 140, 0));
-            } else {
-                g.setColor(new Color(220, 80, 0));
-            }
+            g.setColor(i % 2 == 0 ? theme.stat1Color : theme.stat2Color);
             g.drawString((i + 1) + ". " + highScores.get(i), 70, 290 + i * 20);
         }
         
-        g.setColor(new Color(255, 180, 50));
+        g.setColor(theme.gameOverFooterText);
         g.drawString(">> Press R to Restart | Press D to Change Design <<", 20, 280 + highScores.size() * 20 + 20);
     }
 
     private void drawGameOverRetro(Graphics2D g) {
-        g.setColor(new Color(50, 50, 50, 200));
+        Theme theme = currentTheme();
+        g.setColor(withAlpha(Color.DARK_GRAY, 200));
         g.fillRect(0, 0, WIDTH, HEIGHT);
         drawDesignButtons(g);
         
         // Draw retro border
-        g.setColor(new Color(200, 200, 0));
+        g.setColor(theme.border);
         g.setStroke(new BasicStroke(4));
         g.drawRect(30, 120, 350, 400);
         
         g.setFont(new Font("Courier New", Font.BOLD, 32));
-        g.setColor(new Color(200, 200, 0));
+        g.setColor(theme.gameOverHeaderTextColor);
         g.drawString("GAME OVER", 80, 180);
         
         g.setFont(new Font("Courier New", Font.PLAIN, 14));
-        g.setColor(new Color(255, 255, 255));
+        g.setColor(theme.gameOverInfoText);
         g.drawString("Final Score: " + score, 70, 220);
         g.drawString("Lines: " + lines, 70, 240);
         g.drawString("Level: " + level, 70, 260);
         
-        g.setColor(new Color(200, 200, 0));
+        g.setColor(theme.gameOverHighScoreLabelColor);
         g.drawString("High Scores:", 70, 290);
-        g.setColor(new Color(255, 255, 255));
+        g.setColor(theme.gameOverHighScoreText);
         for (int i = 0; i < highScores.size(); i++) {
             g.drawString((i + 1) + ". " + highScores.get(i), 70, 310 + i * 18);
         }
         
-        g.setColor(new Color(200, 200, 0));
+        g.setColor(theme.gameOverFooterText);
         g.drawString("[R] RESTART  [D] DESIGN", 60, 280 + highScores.size() * 18 + 40);
     }
 
     private void drawGameOverWin95(Graphics2D g) {
+        Theme theme = currentTheme();
+
         // Windows 95 style game over screen
-        g.setColor(new Color(192, 192, 192));
+        g.setColor(theme.gameOverBackground);
         g.fillRect(0, 0, WIDTH, HEIGHT);
         
         // Draw window frame
@@ -1128,43 +1069,45 @@ class TetrisPanel extends JPanel {
         int winH = 620;
         
         // Window background
-        g.setColor(new Color(192, 192, 192));
+        g.setColor(theme.gameOverWindowBackground);
         g.fillRect(winX, winY, winW, winH);
         
-        // Outer border (white/gray 3D effect)
-        g.setColor(new Color(255, 255, 255));
+        // Outer border (highlight/shadow 3D effect)
+        g.setColor(theme.gameOverFrameHighlight);
         g.drawLine(winX, winY, winX + winW, winY);
         g.drawLine(winX, winY, winX, winY + winH);
         
-        g.setColor(new Color(128, 128, 128));
+        g.setColor(theme.gameOverFrameShadow);
         g.drawLine(winX + winW, winY, winX + winW, winY + winH);
         g.drawLine(winX, winY + winH, winX + winW, winY + winH);
         
         // Title bar
-        g.setColor(new Color(0, 0, 170));
+        g.setColor(theme.gameOverTitleBarColor);
         g.fillRect(winX, winY, winW, 25);
-        g.setColor(new Color(255, 255, 255));
+        g.setColor(theme.gameOverTitleTextColor);
         g.setFont(new Font("MS Sans Serif", Font.BOLD, 14));
         g.drawString("Tetris - Game Over", winX + 10, winY + 18);
         
         // Content
-        g.setColor(new Color(0, 0, 0));
+        g.setColor(theme.gameOverHeaderTextColor);
         g.setFont(new Font("MS Sans Serif", Font.BOLD, 24));
         g.drawString("GAME OVER", winX + 150, winY + 70);
         
+        g.setColor(theme.gameOverInfoText);
         g.setFont(new Font("MS Sans Serif", Font.PLAIN, 12));
         g.drawString("Final Score: " + score, winX + 50, winY + 120);
         g.drawString("Lines Cleared: " + lines, winX + 50, winY + 145);
         g.drawString("Level Reached: " + level, winX + 50, winY + 170);
         
-        g.setColor(new Color(0, 0, 170));
+        g.setColor(theme.gameOverHighScoreLabelColor);
         g.drawString("High Scores:", winX + 50, winY + 210);
         
-        g.setColor(new Color(0, 0, 0));
+        g.setColor(theme.gameOverHighScoreText);
         for (int i = 0; i < Math.min(5, highScores.size()); i++) {
             g.drawString((i + 1) + ". " + highScores.get(i), winX + 70, winY + 235 + i * 18);
         }
         
+        g.setColor(theme.gameOverFooterText);
         g.setFont(new Font("MS Sans Serif", Font.PLAIN, 11));
         g.drawString("Press [R] to Restart", winX + 50, winY + winH - 35);
         
@@ -1203,19 +1146,198 @@ class Tetromino {
     }
 }
 
-// Color cycling utility method for pastel rainbow effect
-class ColorCycler {
-    public static Color getPastelRainbowColor(long timeMs, int offset) {
-        // Cycle through pastel rainbow colors
-        double cycle = (timeMs + offset * 30) % 4000 / 4000.0; // 4 second cycle
-        double hue = cycle;
-        
-        // Pastel colors - high saturation for vibrancy but light tints
-        float saturation = 0.5f;
-        float brightness = 0.8f;
-        
-        Color c = Color.getHSBColor((float) hue, saturation, brightness);
-        return c;
+/**
+ * Holds every color used by one visual design ("theme"), loaded from themes.yaml.
+ * Optional gameOver* fields fall back to sensible base colors via applyFallbacks()
+ * when a theme doesn't define them (see applyFallbacks()).
+ */
+class Theme {
+    String name;
+    Color background = Color.BLACK;
+    Color grid = new Color(30, 30, 30);
+    Color border = Color.WHITE;
+    Color scoreColor = Color.WHITE;
+    Color labelColor = Color.WHITE;
+    Color boxColor = new Color(180, 180, 180);
+    Color stat1Color = Color.CYAN;
+    Color stat2Color = Color.YELLOW;
+    Color stat3Color = Color.MAGENTA;
+    List<Color> buttonColors = new ArrayList<>();
+    Color buttonTextColor = Color.WHITE;
+    Color buttonSelectedLight = Color.WHITE;
+    Color buttonSelectedDark = new Color(128, 128, 128);
+    Color buttonUnselectedLight = Color.WHITE;
+    Color buttonUnselectedDark = Color.BLACK;
+    List<Color> paletteColors = new ArrayList<>();
+
+    // Optional, only really used by the Win95 game-over screen; other themes fall back
+    // to their base colors for these via applyFallbacks().
+    Color gameOverBackground;
+    Color gameOverWindowBackground;
+    Color gameOverFrameHighlight;
+    Color gameOverFrameShadow;
+    Color gameOverTitleBarColor;
+    Color gameOverTitleTextColor;
+    Color gameOverHeaderTextColor;
+    Color gameOverInfoText;
+    Color gameOverHighScoreLabelColor;
+    Color gameOverHighScoreText;
+    Color gameOverFooterText;
+
+    /** Fills in any unset optional fields with reasonable derived defaults. Call after parsing. */
+    void applyFallbacks() {
+        if (gameOverBackground == null) gameOverBackground = background;
+        if (gameOverWindowBackground == null) gameOverWindowBackground = background;
+        if (gameOverFrameHighlight == null) gameOverFrameHighlight = border;
+        if (gameOverFrameShadow == null) gameOverFrameShadow = grid;
+        if (gameOverTitleBarColor == null) gameOverTitleBarColor = border;
+        if (gameOverTitleTextColor == null) gameOverTitleTextColor = buttonTextColor;
+        if (gameOverHeaderTextColor == null) gameOverHeaderTextColor = scoreColor;
+        if (gameOverInfoText == null) gameOverInfoText = labelColor;
+        if (gameOverHighScoreLabelColor == null) gameOverHighScoreLabelColor = scoreColor;
+        if (gameOverHighScoreText == null) gameOverHighScoreText = labelColor;
+        if (gameOverFooterText == null) gameOverFooterText = labelColor;
+    }
+
+    /** Cycles through paletteColors for tetromino color indices (1-based, wraps around). */
+    Color paletteColor(int pieceColorIndex) {
+        if (paletteColors.isEmpty()) return Color.GRAY;
+        int idx = (pieceColorIndex - 1) % paletteColors.size();
+        if (idx < 0) idx += paletteColors.size();
+        return paletteColors.get(idx);
+    }
+
+    Color buttonColor(int i) {
+        if (buttonColors.isEmpty()) return Color.GRAY;
+        return buttonColors.get(i % buttonColors.size());
     }
 }
 
+/**
+ * Minimal, dependency-free YAML reader tailored to the simple structure used by
+ * themes.yaml: top-level theme names, 2-space indented "key: value" pairs
+ * (value either a scalar or an "[r, g, b]" color), and 2-space indented
+ * "key:" headers followed by 4-space indented "- [r, g, b]" list items.
+ * This intentionally does not support general YAML syntax.
+ */
+class ThemeLoader {
+
+    static Map<String, Theme> load(String path) {
+        Map<String, Theme> themes = new LinkedHashMap<>();
+        try {
+            List<String> lines = Files.readAllLines(Paths.get(path));
+            Theme current = null;
+            String pendingListKey = null;
+            List<Color> pendingList = null;
+
+            for (String raw : lines) {
+                if (raw.trim().isEmpty() || raw.trim().startsWith("#")) continue;
+                int indent = indentOf(raw);
+                String line = raw.trim();
+
+                if (indent == 0) {
+                    flushList(current, pendingListKey, pendingList);
+                    pendingListKey = null;
+                    pendingList = null;
+
+                    if (line.endsWith(":")) {
+                        String themeName = line.substring(0, line.length() - 1).trim();
+                        current = new Theme();
+                        current.name = themeName;
+                        themes.put(themeName, current);
+                    }
+                    continue;
+                }
+
+                if (current == null) continue;
+
+                if (indent == 2) {
+                    flushList(current, pendingListKey, pendingList);
+                    pendingListKey = null;
+                    pendingList = null;
+
+                    int colon = line.indexOf(':');
+                    if (colon == -1) continue;
+                    String key = line.substring(0, colon).trim();
+                    String value = line.substring(colon + 1).trim();
+
+                    if (value.isEmpty()) {
+                        pendingListKey = key;
+                        pendingList = new ArrayList<>();
+                    } else if (value.startsWith("[")) {
+                        assignColor(current, key, parseColor(value));
+                    } else {
+                        assignScalar(current, key, value);
+                    }
+                } else if (indent >= 4 && pendingListKey != null && line.startsWith("- ")) {
+                    String value = line.substring(2).trim();
+                    pendingList.add(parseColor(value));
+                }
+            }
+            flushList(current, pendingListKey, pendingList);
+
+            for (Theme t : themes.values()) {
+                t.applyFallbacks();
+            }
+        } catch (IOException e) {
+            System.err.println("Konnte " + path + " nicht laden: " + e.getMessage());
+        }
+        return themes;
+    }
+
+    private static int indentOf(String line) {
+        int i = 0;
+        while (i < line.length() && line.charAt(i) == ' ') i++;
+        return i;
+    }
+
+    private static void flushList(Theme theme, String key, List<Color> list) {
+        if (theme == null || key == null || list == null) return;
+        if (key.equals("buttonColors")) theme.buttonColors = list;
+        else if (key.equals("paletteColors")) theme.paletteColors = list;
+    }
+
+    private static Color parseColor(String value) {
+        String cleaned = value.replace("[", "").replace("]", "").trim();
+        String[] parts = cleaned.split(",");
+        int r = Integer.parseInt(parts[0].trim());
+        int g = Integer.parseInt(parts[1].trim());
+        int b = Integer.parseInt(parts[2].trim());
+        return new Color(r, g, b);
+    }
+
+    private static void assignScalar(Theme t, String key, String value) {
+        if (key.equals("name")) t.name = value;
+    }
+
+    private static void assignColor(Theme t, String key, Color c) {
+        switch (key) {
+            case "background": t.background = c; break;
+            case "grid": t.grid = c; break;
+            case "border": t.border = c; break;
+            case "scoreColor": t.scoreColor = c; break;
+            case "labelColor": t.labelColor = c; break;
+            case "boxColor": t.boxColor = c; break;
+            case "stat1Color": t.stat1Color = c; break;
+            case "stat2Color": t.stat2Color = c; break;
+            case "stat3Color": t.stat3Color = c; break;
+            case "buttonTextColor": t.buttonTextColor = c; break;
+            case "buttonSelectedLight": t.buttonSelectedLight = c; break;
+            case "buttonSelectedDark": t.buttonSelectedDark = c; break;
+            case "buttonUnselectedLight": t.buttonUnselectedLight = c; break;
+            case "buttonUnselectedDark": t.buttonUnselectedDark = c; break;
+            case "gameOverBackground": t.gameOverBackground = c; break;
+            case "gameOverWindowBackground": t.gameOverWindowBackground = c; break;
+            case "gameOverFrameHighlight": t.gameOverFrameHighlight = c; break;
+            case "gameOverFrameShadow": t.gameOverFrameShadow = c; break;
+            case "gameOverTitleBarColor": t.gameOverTitleBarColor = c; break;
+            case "gameOverTitleTextColor": t.gameOverTitleTextColor = c; break;
+            case "gameOverHeaderTextColor": t.gameOverHeaderTextColor = c; break;
+            case "gameOverInfoText": t.gameOverInfoText = c; break;
+            case "gameOverHighScoreLabelColor": t.gameOverHighScoreLabelColor = c; break;
+            case "gameOverHighScoreText": t.gameOverHighScoreText = c; break;
+            case "gameOverFooterText": t.gameOverFooterText = c; break;
+            default: break;
+        }
+    }
+}
