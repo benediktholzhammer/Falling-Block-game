@@ -1,8 +1,5 @@
-import javax.swing.*;
-import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.event.*;
-import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -11,6 +8,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.*;
 
 public class tetris extends JFrame {
     private TetrisPanel gamePanel;
@@ -64,11 +62,7 @@ class TetrisPanel extends JPanel {
     private Tetromino heldTetromino;
     private boolean canSwap;
     private int comboCount;
-    private long gameOverImageTime = 0;
-    private static final long IMAGE_DISPLAY_TIME = 2000;
-    private BufferedImage gameOverImage = null;
-    private boolean imageLoadAttempted = false;
-    private int guiDesign = 0; // index into designNames -- also the theme key used to look up colors
+    private int guiDesign = 0; 
     private Rectangle[] designButtons = new Rectangle[4];
     private String[] designNames = {"Default", "Sunset", "Retro", "Win95"};
     private static final int BUTTON_WIDTH = 80;
@@ -76,7 +70,6 @@ class TetrisPanel extends JPanel {
     private static final int BUTTONS_START_Y = 720;
     private static final int BUTTON_SPACING = 10;
 
-    // Themes loaded from themes.yaml, keyed by theme name (matches entries in designNames)
     private Map<String, Theme> themes;
 
     public TetrisPanel() {
@@ -103,7 +96,6 @@ class TetrisPanel extends JPanel {
         currentTetromino = new Tetromino();
         nextTetromino = new Tetromino();
         
-        // Initialize design buttons - centered
         int totalButtonWidth = 4 * BUTTON_WIDTH + 3 * BUTTON_SPACING;
         int startX = (PREFERRED_WIDTH - totalButtonWidth) / 2;
         for (int i = 0; i < 4; i++) {
@@ -206,11 +198,6 @@ class TetrisPanel extends JPanel {
         renderTimer.start();
     }
 
-    /**
-     * Loads all themes from themes.yaml (searched in the working directory).
-     * If the file is missing, unreadable, or a design is not defined inside it,
-     * a safe fallback theme is generated so the game never crashes because of it.
-     */
     private void loadThemes() {
         themes = ThemeLoader.load(resolveThemesPath());
 
@@ -230,17 +217,24 @@ class TetrisPanel extends JPanel {
     private String resolveThemesPath() {
         String[] candidates = {
             THEMES_FILE,
-            System.getProperty("user.dir") + File.separator + THEMES_FILE
+            System.getProperty("user.dir") + File.separator + THEMES_FILE,
+            new File(THEMES_FILE).getAbsolutePath(),
+            "c:\\Users\\Keke\\Desktop\\game" + File.separator + THEMES_FILE
         };
+        
+        System.out.println("Searching for themes.yaml in:");
         for (String c : candidates) {
+            System.out.println("  Checking: " + c);
             if (new File(c).exists()) {
+                System.out.println("  Found at: " + c);
                 return c;
             }
         }
+        
+        System.err.println("themes.yaml not found in any candidate location");
         return THEMES_FILE;
     }
 
-    /** Returns the Theme object for the currently selected design. Never returns null. */
     private Theme currentTheme() {
         Theme t = themes.get(designNames[guiDesign]);
         if (t != null) return t;
@@ -252,27 +246,6 @@ class TetrisPanel extends JPanel {
 
     private Color withAlpha(Color c, int alpha) {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
-    }
-
-    private void bild() {
-        if(gameOver) {
-            if (!imageLoadAttempted) {
-                imageLoadAttempted = true;
-                try {
-                    File file = new File("0H:\\Desktop\\kimera-evo38.jpg");
-                    gameOverImage = ImageIO.read(file);
-                    if (gameOverImage != null) {
-                        System.out.println("Bild erfolgreich geladen: " + gameOverImage.getWidth() + "x" + gameOverImage.getHeight());
-                    } else {
-                        System.err.println("Bild ist null nach ImageIO.read()");
-                    }
-                } catch (IOException e) {
-                    System.err.println("Fehler beim Laden des Bildes: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-            gameOverImageTime = System.currentTimeMillis();
-        }
     }
 
     private void holdPiece() {
@@ -440,7 +413,6 @@ class TetrisPanel extends JPanel {
         if (gameOver) {
             saveHighScore(score);
             loadHighScores();
-            bild();
         }
     }
 
@@ -499,7 +471,6 @@ class TetrisPanel extends JPanel {
         heldTetromino = null;
         canSwap = true;
         comboCount = 0;
-        gameOverImageTime = 0;
         currentTetromino = new Tetromino();
         nextTetromino = new Tetromino();
         renderPieceY = currentTetromino.y * BLOCK_SIZE;
@@ -613,7 +584,6 @@ class TetrisPanel extends JPanel {
         }
     }
 
-    /** Looks up the color for a placed/falling piece from the current theme's palette. */
     private Color getDesignColor(int colorIndex) {
         return currentTheme().paletteColor(colorIndex);
     }
@@ -657,7 +627,6 @@ class TetrisPanel extends JPanel {
             g.drawString(">", GRID_OFFSET_X + GRID_WIDTH * BLOCK_SIZE + 16, y);
         }
         
-        // Draw border with Windows 95 beveled effect for Win95 design
         if (guiDesign == 3) {
             g.setColor(theme.buttonUnselectedLight);
             g.setStroke(new BasicStroke(2));
@@ -685,18 +654,15 @@ class TetrisPanel extends JPanel {
     }
 
     private void drawGhostPiece(Graphics2D g) {
-        // Calculate where the piece will land
         Tetromino ghost = new Tetromino();
         ghost.shape = copyShape(currentTetromino.shape);
         ghost.x = currentTetromino.x;
         ghost.y = currentTetromino.y;
 
-        // Drop the ghost piece to the bottom
         while (canMove(ghost.x, ghost.y + 1, ghost.shape)) {
             ghost.y++;
         }
 
-        // Draw ghost piece with semi-transparency
         for (int i = 0; i < ghost.shape.length; i++) {
             for (int j = 0; j < ghost.shape[0].length; j++) {
                 if (ghost.shape[i][j] == 1) {
@@ -707,7 +673,6 @@ class TetrisPanel extends JPanel {
                         int x = GRID_OFFSET_X + cellX * BLOCK_SIZE;
                         int y = GRID_OFFSET_Y + cellY * BLOCK_SIZE;
 
-                        // Draw semi-transparent ghost with design-aware color
                         Color baseColor = getDesignColor(currentTetromino.color);
                         Color ghostColor = new Color(baseColor.getRed(), baseColor.getGreen(), baseColor.getBlue(), 70);
                         g.setColor(ghostColor);
@@ -755,7 +720,6 @@ class TetrisPanel extends JPanel {
             Color btnColor = theme.buttonColor(i);
 
             if (guiDesign == 3) {
-                // Windows 95 style buttons
                 g.setColor(btnColor);
                 g.fillRect(btn.x, btn.y, btn.width, btn.height);
 
@@ -774,7 +738,6 @@ class TetrisPanel extends JPanel {
                 int textY = btn.y + ((btn.height - fm.getHeight()) / 2) + fm.getAscent();
                 g.drawString(designNames[i], textX, textY);
             } else {
-                // Colorful buttons for other designs
                 g.setColor(btnColor);
                 g.fillRect(btn.x, btn.y, btn.width, btn.height);
 
@@ -799,6 +762,8 @@ class TetrisPanel extends JPanel {
 
     private void drawScore(Graphics2D g) {
         Theme theme = currentTheme();
+        if (theme == null) return;
+        
         Font scoreFont;
         if (guiDesign == 2) {
             scoreFont = new Font("Courier New", Font.BOLD, 20);
@@ -808,9 +773,11 @@ class TetrisPanel extends JPanel {
             scoreFont = new Font("Arial", Font.BOLD, 20);
         }
         
-        g.setColor(theme.scoreColor);
-        g.setFont(scoreFont);
-        g.drawString("Score: " + score, 10, 30);
+        if (theme.scoreColor != null) {
+            g.setColor(theme.scoreColor);
+            g.setFont(scoreFont);
+            g.drawString("Score: " + score, 10, 30);
+        }
     }
 
     private void drawNextPiece(Graphics2D g) {
@@ -835,7 +802,6 @@ class TetrisPanel extends JPanel {
         g.setColor(theme.boxColor);
         
         if (guiDesign == 3) {
-            // Windows 95 beveled box
             g.setColor(theme.background);
             g.fillRect(previewX, previewY + 15, boxSize, boxSize);
             g.setColor(theme.buttonUnselectedLight);
@@ -891,7 +857,6 @@ class TetrisPanel extends JPanel {
         g.setColor(theme.boxColor);
         
         if (guiDesign == 3) {
-            // Windows 95 beveled box
             g.setColor(theme.background);
             g.fillRect(previewX, previewY + 15, boxSize, boxSize);
             g.setColor(theme.buttonUnselectedLight);
@@ -946,8 +911,12 @@ class TetrisPanel extends JPanel {
 
     private void drawGameOverDefault(Graphics2D g) {
         Theme theme = currentTheme();
-        g.setColor(withAlpha(theme.gameOverBackground, 200));
-        g.fillRect(0, 0, WIDTH, HEIGHT);
+        if (theme == null) return;
+        
+        if (theme.gameOverBackground != null) {
+            g.setColor(withAlpha(theme.gameOverBackground, 200));
+            g.fillRect(0, 0, WIDTH, HEIGHT);
+        }
         drawDesignButtons(g);
         g.setColor(theme.gameOverHeaderTextColor);
         g.setFont(new Font("Arial", Font.BOLD, 36));
@@ -964,33 +933,6 @@ class TetrisPanel extends JPanel {
         }
         g.setColor(theme.gameOverFooterText);
         g.drawString("Press R to Restart | Press D to Change Design", 30, 270 + highScores.size() * 20 + 20);
-        
-        // Bild für 2 Sekunden anzeigen
-        if (gameOverImageTime > 0 && gameOverImage != null) {
-            long elapsedTime = System.currentTimeMillis() - gameOverImageTime;
-            if (elapsedTime < IMAGE_DISPLAY_TIME) {
-                try {
-                    int imgWidth = gameOverImage.getWidth();
-                    int imgHeight = gameOverImage.getHeight();
-                    
-                    if (imgWidth > 0 && imgHeight > 0) {
-                        int maxWidth = WIDTH - 100;
-                        int maxHeight = HEIGHT - 400;
-                        double scale = Math.min((double) maxWidth / imgWidth, 
-                                               (double) maxHeight / imgHeight);
-                        int displayWidth = (int) (imgWidth * scale);
-                        int displayHeight = (int) (imgHeight * scale);
-                        int x = (WIDTH - displayWidth) / 2;
-                        int y = (HEIGHT - displayHeight) / 2;
-                        
-                        g.drawImage(gameOverImage, x, y, displayWidth, displayHeight, null);
-                    }
-                } catch (Exception e) {
-                    System.err.println("Fehler beim Zeichnen des Bildes: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-        }
     }
 
     private void drawGameOverSunset(Graphics2D g) {
@@ -999,7 +941,6 @@ class TetrisPanel extends JPanel {
         g.fillRect(0, 0, WIDTH, HEIGHT);
         drawDesignButtons(g);
         
-        // Sunset glow effect
         g.setColor(withAlpha(theme.border, 100));
         g.fillRect(40, 130, 300, 80);
         
@@ -1028,8 +969,7 @@ class TetrisPanel extends JPanel {
         g.setColor(withAlpha(Color.DARK_GRAY, 200));
         g.fillRect(0, 0, WIDTH, HEIGHT);
         drawDesignButtons(g);
-        
-        // Draw retro border
+
         g.setColor(theme.border);
         g.setStroke(new BasicStroke(4));
         g.drawRect(30, 120, 350, 400);
@@ -1058,21 +998,17 @@ class TetrisPanel extends JPanel {
     private void drawGameOverWin95(Graphics2D g) {
         Theme theme = currentTheme();
 
-        // Windows 95 style game over screen
         g.setColor(theme.gameOverBackground);
         g.fillRect(0, 0, WIDTH, HEIGHT);
         
-        // Draw window frame
         int winX = 75;
         int winY = 50;
         int winW = 550;
         int winH = 620;
         
-        // Window background
         g.setColor(theme.gameOverWindowBackground);
         g.fillRect(winX, winY, winW, winH);
         
-        // Outer border (highlight/shadow 3D effect)
         g.setColor(theme.gameOverFrameHighlight);
         g.drawLine(winX, winY, winX + winW, winY);
         g.drawLine(winX, winY, winX, winY + winH);
@@ -1081,14 +1017,12 @@ class TetrisPanel extends JPanel {
         g.drawLine(winX + winW, winY, winX + winW, winY + winH);
         g.drawLine(winX, winY + winH, winX + winW, winY + winH);
         
-        // Title bar
         g.setColor(theme.gameOverTitleBarColor);
         g.fillRect(winX, winY, winW, 25);
         g.setColor(theme.gameOverTitleTextColor);
         g.setFont(new Font("MS Sans Serif", Font.BOLD, 14));
         g.drawString("Tetris - Game Over", winX + 10, winY + 18);
         
-        // Content
         g.setColor(theme.gameOverHeaderTextColor);
         g.setFont(new Font("MS Sans Serif", Font.BOLD, 24));
         g.drawString("GAME OVER", winX + 150, winY + 70);
@@ -1110,8 +1044,7 @@ class TetrisPanel extends JPanel {
         g.setColor(theme.gameOverFooterText);
         g.setFont(new Font("MS Sans Serif", Font.PLAIN, 11));
         g.drawString("Press [R] to Restart", winX + 50, winY + winH - 35);
-        
-        // Draw buttons below the window
+
         drawDesignButtons(g);
     }
 
@@ -1146,11 +1079,6 @@ class Tetromino {
     }
 }
 
-/**
- * Holds every color used by one visual design ("theme"), loaded from themes.yaml.
- * Optional gameOver* fields fall back to sensible base colors via applyFallbacks()
- * when a theme doesn't define them (see applyFallbacks()).
- */
 class Theme {
     String name;
     Color background = Color.BLACK;
@@ -1170,8 +1098,6 @@ class Theme {
     Color buttonUnselectedDark = Color.BLACK;
     List<Color> paletteColors = new ArrayList<>();
 
-    // Optional, only really used by the Win95 game-over screen; other themes fall back
-    // to their base colors for these via applyFallbacks().
     Color gameOverBackground;
     Color gameOverWindowBackground;
     Color gameOverFrameHighlight;
@@ -1184,7 +1110,6 @@ class Theme {
     Color gameOverHighScoreText;
     Color gameOverFooterText;
 
-    /** Fills in any unset optional fields with reasonable derived defaults. Call after parsing. */
     void applyFallbacks() {
         if (gameOverBackground == null) gameOverBackground = background;
         if (gameOverWindowBackground == null) gameOverWindowBackground = background;
@@ -1199,7 +1124,6 @@ class Theme {
         if (gameOverFooterText == null) gameOverFooterText = labelColor;
     }
 
-    /** Cycles through paletteColors for tetromino color indices (1-based, wraps around). */
     Color paletteColor(int pieceColorIndex) {
         if (paletteColors.isEmpty()) return Color.GRAY;
         int idx = (pieceColorIndex - 1) % paletteColors.size();
@@ -1213,13 +1137,6 @@ class Theme {
     }
 }
 
-/**
- * Minimal, dependency-free YAML reader tailored to the simple structure used by
- * themes.yaml: top-level theme names, 2-space indented "key: value" pairs
- * (value either a scalar or an "[r, g, b]" color), and 2-space indented
- * "key:" headers followed by 4-space indented "- [r, g, b]" list items.
- * This intentionally does not support general YAML syntax.
- */
 class ThemeLoader {
 
     static Map<String, Theme> load(String path) {
@@ -1279,8 +1196,13 @@ class ThemeLoader {
             for (Theme t : themes.values()) {
                 t.applyFallbacks();
             }
+            
+            if (!themes.isEmpty()) {
+                System.out.println("Successfully loaded " + themes.size() + " themes from " + path);
+            }
         } catch (IOException e) {
-            System.err.println("Konnte " + path + " nicht laden: " + e.getMessage());
+            System.err.println("Fehler beim Laden von " + path + ": " + e.getMessage());
+            e.printStackTrace();
         }
         return themes;
     }
